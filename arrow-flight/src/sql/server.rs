@@ -238,6 +238,52 @@ pub trait FlightSqlService: Sync + Send + Sized + 'static {
         )))
     }
 
+    /// get_schema implementation
+    /// Get Schema of SQL query's result set without executing it.
+    async fn get_schema_statement(
+        &self,
+        _query: CommandStatementQuery,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<SchemaResult>, Status> {
+        Err(Status::unimplemented(
+            "get_schema_statement has no default implementation",
+        ))
+    }
+
+    /// Get the schema of a prepared statement's result set.
+    async fn get_schema_prepared_statement(
+        &self,
+        _query: CommandPreparedStatementQuery,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<SchemaResult>, Status> {
+        Err(Status::unimplemented(
+            "get_schema_prepared_statement has no default implementation",
+        ))
+    }
+
+    /// Get the schema of a substrait plan's result set.
+    async fn get_schema_substrait_plan(
+        &self,
+        _query: CommandStatementSubstraitPlan,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<SchemaResult>, Status> {
+        Err(Status::unimplemented(
+            "get_schema_substrait_plan has no default implementation",
+        ))
+    }
+
+    /// Implementors may override to handle additional calls to get_schema().
+    async fn get_schema_fallback(
+        &self,
+        cmd: Command,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<SchemaResult>, Status> {
+        Err(Status::unimplemented(format!(
+            "get_schema: The defined request is invalid: {}",
+            cmd.type_url()
+        )))
+    }
+
     // do_get
 
     /// Get a FlightDataStream containing the query results.
@@ -665,9 +711,20 @@ where
 
     async fn get_schema(
         &self,
-        _request: Request<FlightDescriptor>,
+        request: Request<FlightDescriptor>,
     ) -> Result<Response<SchemaResult>, Status> {
-        Err(Status::unimplemented("Not yet implemented"))
+        let message = Any::decode(&*request.get_ref().cmd).map_err(decode_error_to_status)?;
+
+        match Command::try_from(message).map_err(arrow_error_to_status)? {
+            Command::CommandStatementQuery(cmd) => self.get_schema_statement(cmd, request).await,
+            Command::CommandPreparedStatementQuery(cmd) => {
+                self.get_schema_prepared_statement(cmd, request).await
+            }
+            Command::CommandStatementSubstraitPlan(cmd) => {
+                self.get_schema_substrait_plan(cmd, request).await
+            }
+            cmd => self.get_schema_fallback(cmd, request).await,
+        }
     }
 
     async fn do_get(
